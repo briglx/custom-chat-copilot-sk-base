@@ -4,7 +4,7 @@ This project demonstrates the use of Azure AI services to build a chat applicati
 
 # Architecture Overview
 
-![Architecture Overview](docs/images/architecture_overview.png)
+![Architecture Overview](./docs/architecture_overview.png)
 
 **Solution**
 
