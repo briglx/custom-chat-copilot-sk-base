@@ -2,28 +2,30 @@ param name string
 param location string = resourceGroup().location
 param tags object = {}
 
+param allowBlobPublicAccess bool = true
+param containers array = []
+param kind string = 'StorageV2'
+param minimumTlsVersion string = 'TLS1_2'
+param sku object = { name: 'Standard_LRS' }
+
+
 @allowed([
   'Cool'
   'Hot'
   'Premium' ])
 param accessTier string = 'Hot'
-param allowBlobPublicAccess bool = true
 param allowCrossTenantReplication bool = true
 param allowSharedKeyAccess bool = true
-param containers array = []
 param defaultToOAuthAuthentication bool = false
 param deleteRetentionPolicy object = {}
 @allowed([ 'AzureDnsZone', 'Standard' ])
 param dnsEndpointType string = 'Standard'
-param kind string = 'StorageV2'
-param minimumTlsVersion string = 'TLS1_2'
 param networkAcls object = {
   bypass: 'AzureServices'
   defaultAction: 'Allow'
 }
 @allowed([ 'Enabled', 'Disabled' ])
 param publicNetworkAccess string = 'Enabled'
-param sku object = { name: 'Standard_LRS' }
 
 resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' = {
   name: name
@@ -57,7 +59,11 @@ resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' = {
   }
 }
 
-var blobStorageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storage.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${listKeys(storage.id, storage.apiVersion).keys[0].value}'
 output name string = storage.name
+output id string = storage.id
 output primaryEndpoints object = storage.properties.primaryEndpoints
-output connectionString string  = blobStorageConnectionString
+output containerNames array = [for (name, i) in containers: {
+  name: name
+  url: '${storage.properties.primaryEndpoints.blob}/${name}'
+}]
+

@@ -1,15 +1,17 @@
 @description('Cosmos DB account name')
-param accountName string = 'sql-${uniqueString(resourceGroup().id)}'
+param name string
 
 @description('The name for the SQL database')
 param databaseName string
 
 @description('Location for the Cosmos DB account.')
 param location string = resourceGroup().location
+param tags object = {}
 
 resource account 'Microsoft.DocumentDB/databaseAccounts@2020-06-01-preview' = {
-  name: toLower(accountName)
+  name: toLower(name)
   location: location
+  tags: tags
   kind: 'GlobalDocumentDB'
   properties: {
     enableAutomaticFailover: false
@@ -93,5 +95,6 @@ resource chatTurn  'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
   }
 }
 
-output connectionString string = listConnectionStrings(account.id, '2019-12-12').connectionStrings[0].connectionString
-output primaryMasterKeyKey string = listKeys(account.id, '2019-08-01').primaryMasterKey
+output name string = account.name
+//output connectionString string = listConnectionStrings(account.id, '2019-12-12').connectionStrings[0].connectionString
+//output primaryMasterKeyKey string = listKeys(account.id, '2019-08-01').primaryMasterKey

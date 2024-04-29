@@ -1,15 +1,19 @@
-param location string
 param name string
+param location string
+param tags object = {}
+
 param environmentName string
 
-param storageConnectionString string
-param storageBlobEndpoint string
+param storageAccountName string
+param storageAccountRG string
 param storageContainerName string
 
-param cosmosDBConnectionString string
+param cosmosDBName string
+param cosmosDBRG string
+//param cosmosDBConnectionString string
 
-param azureSearchServiceKey string
-param azureSearchServiceEndpoint string
+param azureSearchName string
+param azureSearchRG string
 param azureSearchContentIndex string
 
 param aoaiPremiumServiceEndpoint string
@@ -25,6 +29,9 @@ param aoaiEmbeddingsDeployment string
 @description('Name of the Log Analytics workspace')
 param logAnalyticsWorkspaceName string
 
+@description('Name of the Azure Container Registry')
+param acrName string
+
 // Container Image ref
 param containerImage string
 
@@ -32,21 +39,37 @@ param containerImage string
 param useExternalIngress bool = false
 param containerPort int
 
-param envVars array = []
-
-param acrName string
-
+// Dependency resources
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' existing = {
   name: logAnalyticsWorkspaceName
 }
-
-resource acr 'Microsoft.ContainerRegistry/registries@2021-06-01-preview' existing = {
-  name: acrName
+resource storageAccount 'Microsoft.Storage/storageAccounts@2021-06-01' existing = {
+  name: storageAccountName
+  scope: resourceGroup(storageAccountRG)
 }
+var keys = listKeys(storageAccount.id, '2019-06-01')
+//var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=' + storageAccount.name + ';AccountKey=' + keys.keys[0].value
+var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${keys.keys[0].value}'
+var storageBlobEndpoint = storageAccount.properties.primaryEndpoints.blob
 
+resource searchService 'Microsoft.Search/searchServices@2020-08-01' existing = {
+  name: azureSearchName
+  scope: resourceGroup(azureSearchRG)
+}
+var azureSearchServiceKey = searchService.listQueryKeys().value[0].key
+var azureSearchServiceEndpoint = 'https://${name}.search.windows.net/'
+
+resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2021-04-15' existing = {
+  name: cosmosDBName
+  scope: resourceGroup(cosmosDBRG)
+}
+var cosmosDBConnectionString = listConnectionStrings(cosmosDB.id, '2019-12-12').connectionStrings[0].connectionString
+
+// Container App Env
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-04-01-preview' = {
   name: environmentName
   location: location
+  tags: tags
   properties: {
     appLogsConfiguration: {
       destination: 'log-analytics'
@@ -58,17 +81,17 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-04-01-
   }
 }
 
+// Container App
 resource containerApp 'Microsoft.App/containerApps@2022-03-01' = {
   name: name
   location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: containerAppsEnvironment.id
     configuration: {
       secrets: [
-        {
-          name: 'acrpassword'
-          value: acr.listCredentials().passwords[0].value
-        }
         {
           name: 'cosmosdbconnectionstring'
           value: cosmosDBConnectionString
@@ -88,13 +111,6 @@ resource containerApp 'Microsoft.App/containerApps@2022-03-01' = {
         {
           name: 'azurestorageconnectionstring'
           value: storageConnectionString
-        }
-      ]
-      registries: [
-        {
-          server: '${acrName}.azurecr.io'
-          username: acr.listCredentials().username
-          passwordSecretRef: 'acrpassword'
         }
       ]
       ingress: {
@@ -164,7 +180,7 @@ resource containerApp 'Microsoft.App/containerApps@2022-03-01' = {
               name: 'AOAIEmbeddingsDeployment'
               value: aoaiEmbeddingsDeployment
             }
-            
+
           ]
         }
       ]

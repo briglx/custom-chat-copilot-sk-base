@@ -15,6 +15,9 @@
 #    -s, --subscription Subscription ID
 #        --org      GitHub organization
 #        --repo     GitHub repository
+#        --logAnalyticsWorkspaceName Log Analytics workspace name
+#        --aoaiServiceEndpoint AOAI service endpoint
+#        --aoaiServiceKey AOAI service key
 #    -m, --message  Deployment message
 #    -h, --help     Show this message and get help for a command.
 #    -l, --location Resource location. Default westus3
@@ -41,6 +44,9 @@ show_help() {
     echo "   -s, --subscription      Subscription ID"
     echo "       --org              GitHub organization"
     echo "       --repo             GitHub repository"
+    echo "       --logAnalyticsWorkspaceName Log Analytics workspace name"
+    echo "       --aoaiServiceEndpoint AOAI service endpoint"
+    echo "       --aoaiServiceKey AOAI service key"
     echo "   -m, --message          Deployment message"
     echo "   -l, --location         Resource location. Default westus3"
     echo "   -h, --help             Show this message and get help for a command."
@@ -137,21 +143,103 @@ provision_sp(){
 
 }
 
-provision(){
-    # Provision resources for the application.
-    local location=$1
-    local deployment_name="common_services.Provisioning-${run_date}"
+replace_parameters(){
 
-    additional_parameters=("message=$message")
+    # echo "Replace parameters with environment variables"
+    additional_parameters=()
     if [ -n "$location" ]
     then
         additional_parameters+=("location=$location")
     fi
+    if [ -n "$name" ]
+    then
+        additional_parameters+=("applicationName=$name")
+    fi
+
+    if [ -n "$log_analytics_workspace_name" ]
+    then
+        additional_parameters+=("logAnalyticsWorkspaceName=$log_analytics_workspace_name")
+    fi
+
+    if [ -n "$aoai_service_endpoint" ]
+    then
+        additional_parameters+=("aoaiServiceEndpoint=$aoai_service_endpoint")
+    fi
+
+    if [ -n "$aoai_service_key" ]
+    then
+        additional_parameters+=("aoaiServiceKey=$aoai_service_key")
+    fi
+
+    echo "${additional_parameters[@]}"
+
+}
+
+validate_deployment(){
+    local location=$1
+    local deployment_name="${PROJ_NAME}.validate_deployment-${run_date}"
+
+    IFS=' ' read -ra additional_parameters <<< "$(replace_parameters)"
+
+
+    echo "Validating ${deployment_name} with ${additional_parameters[*]}"
+
+    result=$(az deployment sub validate \
+        --no-prompt true \
+        --name "${deployment_name}" \
+        --location "$location" \
+        --template-file "${INFRA_DIRECTORY}/main.bicep" \
+        --parameters "${INFRA_DIRECTORY}/main.parameters.json" \
+        --parameters "${additional_parameters[@]}")
+
+    state=$(echo "$result" | jq -r '.properties.provisioningState')
+    if [ "$state" != "Succeeded" ]
+    then
+        echo "Validation failed with state $state"
+        echo "$result" | jq -r '.properties.error.details[]'
+        exit 1
+    fi
+
+}
+
+provision(){
+    # Provision resources for the application.
+    local location=$1
+    local deployment_name="${PROJ_NAME}.provision-${run_date}"
+
+    # Replace parameters
+    IFS=' ' read -ra additional_parameters <<< "$(replace_parameters)"
 
     echo "Deploying ${deployment_name} with ${additional_parameters[*]}"
 
-    # shellcheck source=/home/brlamore/src/azure_subscription_boilerplate/iac/common_services_deployment.sh
-    source "${INFRA_DIRECTORY}/common_services_deployment.sh" --parameters "${additional_parameters[@]}"
+    result=$(az deployment sub create \
+        --no-prompt true \
+        --name "${deployment_name}" \
+        --location "$location" \
+        --template-file "${INFRA_DIRECTORY}/main.bicep" \
+        --parameters "${INFRA_DIRECTORY}/main.parameters.json" \
+        --parameters "${additional_parameters[@]}")
+
+    echo "$result" >> "${PROJ_ROOT_PATH}/.azuredeploy.log"
+
+    state=$(echo "$result" | jq -r '.properties.provisioningState')
+    if [ "$state" != "Succeeded" ]
+    then
+        echo "Deployment failed with state $state"
+        echo "$result" | jq -r '.properties.error.details[]'
+        exit 1
+    fi
+
+    # Get the output variables from the deployment
+    output_variables=$(az deployment sub show -n "${deployment_name}" --query 'properties.outputs' --output json)
+    echo "Save deployment $deployment_name output variables to ${ENV_FILE}"
+    {
+        echo ""
+        echo "# Deployment output variables"
+        echo "# Generated on ${ISO_DATE_UTC}"
+        echo "$output_variables" | jq -r 'to_entries[] | "\(.key | ascii_upcase )=\(.value.value)"'
+    }>> "$ENV_FILE"
+
 }
 
 delete(){
@@ -215,15 +303,16 @@ update_environment_variables(){
 # Globals
 PROJ_ROOT_PATH=$(cd "$(dirname "$0")"/..; pwd)
 echo "Project root: $PROJ_ROOT_PATH"
+PROJ_NAME=$(basename "$PROJ_ROOT_PATH")
 SCRIPT_DIRECTORY="${PROJ_ROOT_PATH}/script"
-INFRA_DIRECTORY="${PROJ_ROOT_PATH}/iac"
+INFRA_DIRECTORY="${PROJ_ROOT_PATH}/infrastructure"
 ENV_FILE="${PROJ_ROOT_PATH}/.env"
 
 # shellcheck source=common.sh
 source "${SCRIPT_DIRECTORY}/common.sh"
 
 # Argument/Options
-LONGOPTS=name:,message:,resource-group:,location:,org:,repo:,subscription:,jumpbox,help
+LONGOPTS=name:,message:,resource-group:,location:,org:,repo:,subscription:,logAnalyticsWorkspaceName:,aoaiServiceEndpoint:,aoaiServiceKey:,jumpbox,help
 OPTIONS=n:m:g:l:s:jh
 
 # Variables
@@ -233,6 +322,9 @@ location="westus3"
 subscription_id=""
 github_org=""
 github_repo=""
+log_analytics_workspace_name=""
+aoai_service_endpoint=""
+aoai_service_key=""
 run_date=$(date +%Y%m%dT%H%M%S)
 # ISO_DATE_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
@@ -260,6 +352,18 @@ while true; do
             ;;
         --repo)
             github_repo="$2"
+            shift 2
+            ;;
+        --logAnalyticsWorkspaceName)
+            log_analytics_workspace_name="$2"
+            shift 2
+            ;;
+        --aoaiServiceEndpoint)
+            aoai_service_endpoint="$2"
+            shift 2
+            ;;
+        --aoaiServiceKey)
+            aoai_service_key="$2"
             shift 2
             ;;
         -m|--message)
@@ -295,6 +399,7 @@ case "$command" in
         exit 0
         ;;
     provision)
+        validate_deployment "$location"
         provision "$location"
         exit 0
         ;;

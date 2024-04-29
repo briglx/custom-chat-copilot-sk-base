@@ -29,6 +29,13 @@ This project demonstrates the use of Azure AI services to build a chat applicati
 
 # Quick Start
 
+Pre-requisites:
+
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- [Azure Subscription](https://azure.microsoft.com/en-us/free/)
+- [GitHub Account](https://github.com)
+- [Azure OpenAI Services](https://azure.microsoft.com/en-us/services/cognitive-services/openai/)
+
 Get started using the chat app.
 
 - Fork or Clone this project and configure .env settings
@@ -99,7 +106,16 @@ Create secrets with values from `.env` for:
 [ -f .env ] && while IFS= read -r line; do [[ $line =~ ^[^#]*= ]] && eval "export $line"; done < .env
 
 # Provision Core Infrastructure
-./script/devops.sh provision --app_name "$APP_NAME" --rg_region "$RG_REGION"
+./script/devops.sh provision --name "$APP_NAME" --location "$AZURE_LOCATION"
+
+# With existing resources
+./script/devops.sh provision --name "$APP_NAME" --location "$AZURE_LOCATION" \
+    --logAnalyticsWorkspaceName "$LOG_ANALYTICS_WORKSPACE_NAME" \
+    --cosmosDbName "$COSMOS_DB_NAME" \
+    --searchServiceId "$SEARCH_SERVICE_ID" \
+    --aoaiServiceEndpoint "$AOAI_ENDPOINT" \
+    --aoaiServiceKey "$AOAI_SERVICE_KEY"
+
 ```
 
 ## Deployment App
